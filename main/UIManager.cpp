@@ -361,10 +361,28 @@ void UIManager::switchToWiFiConfigUI() {
     createWiFiConfigUI();
 }
 
+// 添加WiFi二维码配置界面切换函数
+void UIManager::switchToWiFiQRUI() {
+    ESP_LOGI("UIManager", "切换到WiFi二维码配置界面");
+    createWiFiQRUI();
+}
+
 // 切换到笑话界面
 void UIManager::switchToJokeUI() {
     ESP_LOGI("UIManager", "切换到笑话界面");
     createJokeUI();
+}
+
+// 添加Setting界面切换函数
+void UIManager::switchToSettingUI() {
+    ESP_LOGI("UIManager", "切换到设置界面");
+    createSettingUI();
+}
+
+// 添加Microphone界面切换函数
+void UIManager::switchToMicrophoneUI() {
+    ESP_LOGI("UIManager", "切换到麦克风界面");
+    createMicrophoneUI();
 }
 
 // 在createMainUI函数中添加Microphone按钮
@@ -430,89 +448,6 @@ void UIManager::createMainUI() {
     lv_obj_add_event_cb(microphone_btn, microphoneUIEventCallback, LV_EVENT_CLICKED, this);
 }
 
-// 添加Microphone界面创建函数
-void UIManager::createMicrophoneUI() {
-    if (current_screen_) {
-        lv_obj_del(current_screen_);
-    }
-    
-    current_screen_ = lv_obj_create(NULL);
-    lv_screen_load(current_screen_);
-    
-    // 计算自适应尺寸
-    int btn_width = calcBtnWidth();
-    int btn_height = calcBtnHeight();
-    int btn_spacing = calcBtnSpacing();
-    int margin = btn_spacing / 2;
-    
-    ESP_LOGI("UIManager", "创建麦克风界面 - 屏幕分辨率: %dx%d", EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES);
-
-    // 创建麦克风状态标签
-    microphone_status_label_ = lv_label_create(current_screen_);
-    lv_label_set_text(microphone_status_label_, "Microphone Ready - Click Start");
-    lv_obj_align(microphone_status_label_, LV_ALIGN_TOP_MID, 0, margin);
-    
-    // 创建开始/停止按钮
-    lv_obj_t *start_stop_btn = lv_btn_create(current_screen_);
-    lv_obj_set_size(start_stop_btn, btn_width, btn_height);
-    lv_obj_align(start_stop_btn, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_t *start_stop_label = lv_label_create(start_stop_btn);
-    lv_label_set_text(start_stop_label, "Start Recording");
-    lv_obj_center(start_stop_label);
-    lv_obj_add_event_cb(start_stop_btn, microphoneStartStopCallback, LV_EVENT_CLICKED, this);
-
-    // 创建返回按钮
-    lv_obj_t *back_btn = lv_btn_create(current_screen_);
-    lv_obj_set_size(back_btn, btn_width, btn_height);
-    lv_obj_align(back_btn, LV_ALIGN_BOTTOM_RIGHT, -margin, -margin);
-    lv_obj_t *back_label = lv_label_create(back_btn);
-    lv_label_set_text(back_label, LV_SYMBOL_LEFT" Back");
-    lv_obj_center(back_label);
-    lv_obj_add_event_cb(back_btn, backToMainUICallback, LV_EVENT_CLICKED, this);
-}
-
-// 添加Microphone界面切换函数
-void UIManager::switchToMicrophoneUI() {
-    ESP_LOGI("UIManager", "切换到麦克风界面");
-    createMicrophoneUI();
-}
-
-// 添加Microphone按钮事件回调函数
-void UIManager::microphoneUIEventCallback(lv_event_t *e) {
-    UIManager* ui_manager = static_cast<UIManager*>(lv_event_get_user_data(e));
-    if (ui_manager) {
-        ui_manager->switchToMicrophoneUI();
-    }
-}
-
-// 添加麦克风开始/停止按钮事件回调函数
-void UIManager::microphoneStartStopCallback(lv_event_t *e) {
-    UIManager* ui_manager = static_cast<UIManager*>(lv_event_get_user_data(e));
-    if (ui_manager) {
-        MicrophoneService& microphone_service = MicrophoneService::getInstance();
-        lv_obj_t* button = static_cast<lv_obj_t*>(lv_event_get_target(e));
-        lv_obj_t* label = lv_obj_get_child(button, 0);
-        
-        if (!microphone_service.isRecording()) {
-            // 开始录音
-            microphone_service.startRecording();
-            lv_label_set_text(label, "Stop Recording");
-            if (ui_manager->microphone_status_label_) {
-                lv_label_set_text(ui_manager->microphone_status_label_, "Recording Active - Speak now");
-            }
-            ESP_LOGI("UIManager", "Microphone recording started");
-        } else {
-            // 停止录音
-            microphone_service.stopRecording();
-            lv_label_set_text(label, "Start Recording");
-            if (ui_manager->microphone_status_label_) {
-                lv_label_set_text(ui_manager->microphone_status_label_, "Recording Stopped");
-            }
-            ESP_LOGI("UIManager", "Microphone recording stopped");
-        }
-    }
-}
-
 // 创建WiFi配置界面
 void UIManager::createWiFiConfigUI() {
     if (current_screen_) {
@@ -567,7 +502,7 @@ void UIManager::createWiFiConfigUI() {
     lv_obj_t *config_label = lv_label_create(wifi_config_btn);
     lv_label_set_text(config_label, "config WiFi");
     lv_obj_center(config_label);
-    lv_obj_add_event_cb(wifi_config_btn, wifiConfigBtnCallback, LV_EVENT_CLICKED, this);
+    lv_obj_add_event_cb(wifi_config_btn, wifiQRConfigBtnCallback, LV_EVENT_CLICKED, this);
 
     // 创建返回按钮
     lv_obj_t *back_btn = lv_btn_create(current_screen_);
@@ -581,6 +516,112 @@ void UIManager::createWiFiConfigUI() {
     // 创建WiFi状态更新定时器（每秒更新一次）
     deleteWifiStatusTimer();
     wifi_status_timer_ = lv_timer_create(wifiStatusTimerCallback, 1000, this);
+}
+
+// 创建WiFi配置界面
+void UIManager::createWiFiQRUI() {
+    if (current_screen_) {
+        lv_obj_del(current_screen_);
+    }
+    
+    current_screen_ = lv_obj_create(NULL);
+    lv_screen_load(current_screen_);
+    
+    // 计算自适应尺寸
+    int btn_width = calcBtnWidth();
+    int btn_height = calcBtnHeight();
+    int btn_spacing = calcBtnSpacing();
+    int margin = btn_spacing / 2;
+    
+    ESP_LOGI("UIManager", "创建WiFi二维码配置界面 - 屏幕分辨率: %dx%d", EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES);
+
+    // 创建标题
+    lv_obj_t *title_label = lv_label_create(current_screen_);
+    lv_label_set_text(title_label, "WiFi QR Code Configuration");
+    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, margin);
+
+    // 创建说明文字
+    lv_obj_t *instruction_label = lv_label_create(current_screen_);
+    lv_label_set_text(instruction_label, "Scan QR code with your phone\nto configure WiFi settings");
+    lv_obj_set_style_text_align(instruction_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(instruction_label, LV_ALIGN_TOP_MID, 0, margin + btn_height);
+
+    // 创建二维码
+#if LV_USE_QRCODE
+    lv_obj_t *qrcode_obj = lv_qrcode_create(current_screen_);
+    lv_qrcode_set_size(qrcode_obj, 150);
+    lv_qrcode_set_dark_color(qrcode_obj, lv_color_black());
+    lv_qrcode_set_light_color(qrcode_obj, lv_color_white());
+    
+    // 生成二维码数据 - 包含设备信息和配置URL
+    char qr_data[256];
+    // 获取设备MAC地址作为唯一标识
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    snprintf(qr_data, sizeof(qr_data),
+             "http://192.168.4.1/configure?device=%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    
+    lv_qrcode_update(qrcode_obj, qr_data, strlen(qr_data));
+    lv_obj_align(qrcode_obj, LV_ALIGN_CENTER, 0, 0);
+#else
+    // 如果不支持二维码，显示错误信息
+    lv_obj_t *error_label = lv_label_create(current_screen_);
+    lv_label_set_text(error_label, "QR Code feature not available");
+    lv_obj_align(error_label, LV_ALIGN_CENTER, 0, 0);
+#endif
+    
+    // 返回按钮
+    lv_obj_t *back_btn = lv_btn_create(current_screen_);
+    lv_obj_set_size(back_btn, btn_width, btn_height);
+    lv_obj_align(back_btn, LV_ALIGN_BOTTOM_MID, 0, -margin);
+    lv_obj_t *back_label = lv_label_create(back_btn);
+    lv_label_set_text(back_label, "Back");
+    lv_obj_center(back_label);
+    lv_obj_add_event_cb(back_btn, backToWiFiConfigUICallback, LV_EVENT_CLICKED, this);
+}
+
+
+// 添加Setting界面创建函数
+void UIManager::createSettingUI() {
+    if (current_screen_) {
+        lv_obj_del(current_screen_);
+    }
+    
+    current_screen_ = lv_obj_create(NULL);
+    lv_screen_load(current_screen_);
+    
+    // 计算自适应尺寸
+    int btn_width = calcBtnWidth();
+    int btn_height = calcBtnHeight();
+    int btn_spacing = calcBtnSpacing();
+    int margin = btn_spacing / 2;
+    
+    ESP_LOGI("UIManager", "创建设置界面 - 屏幕分辨率: %dx%d", EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES);
+
+    // 创建设置标题
+    setting_label_ = lv_label_create(current_screen_);
+    lv_label_set_text(setting_label_, "Settings");
+    lv_obj_align(setting_label_, LV_ALIGN_TOP_MID, 0, margin);
+    
+    // 创建旋转按钮
+    lv_obj_t *rotate_btn = lv_btn_create(current_screen_);
+    lv_obj_set_size(rotate_btn, btn_width+btn_spacing, btn_height);
+    lv_obj_align(rotate_btn, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_t *rotate_label = lv_label_create(rotate_btn);
+    lv_label_set_text(rotate_label, LV_SYMBOL_REFRESH" Rotate");
+    lv_obj_center(rotate_label);
+    lv_obj_add_event_cb(rotate_btn, rotateBtnCallback, LV_EVENT_CLICKED, this);
+
+    // 创建返回按钮
+    lv_obj_t *back_btn = lv_btn_create(current_screen_);
+    lv_obj_set_size(back_btn, btn_width, btn_height);
+    lv_obj_align(back_btn, LV_ALIGN_BOTTOM_RIGHT, -margin, -margin);
+    lv_obj_t *back_label = lv_label_create(back_btn);
+    lv_label_set_text(back_label, LV_SYMBOL_LEFT" Back");
+    lv_obj_center(back_label);
+    lv_obj_add_event_cb(back_btn, backToMainUICallback, LV_EVENT_CLICKED, this);
 }
 
 // 创建笑话界面
@@ -632,6 +673,84 @@ void UIManager::createJokeUI() {
     lv_obj_add_event_cb(back_btn, backToMainUICallback, LV_EVENT_CLICKED, this);
 }
 
+// 添加Microphone界面创建函数
+void UIManager::createMicrophoneUI() {
+    if (current_screen_) {
+        lv_obj_del(current_screen_);
+    }
+    
+    current_screen_ = lv_obj_create(NULL);
+    lv_screen_load(current_screen_);
+    
+    // 计算自适应尺寸
+    int btn_width = calcBtnWidth();
+    int btn_height = calcBtnHeight();
+    int btn_spacing = calcBtnSpacing();
+    int margin = btn_spacing / 2;
+    
+    ESP_LOGI("UIManager", "创建麦克风界面 - 屏幕分辨率: %dx%d", EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES);
+
+    // 创建麦克风状态标签
+    microphone_status_label_ = lv_label_create(current_screen_);
+    lv_label_set_text(microphone_status_label_, "Microphone Ready - Click Start");
+    lv_obj_align(microphone_status_label_, LV_ALIGN_TOP_MID, 0, margin);
+    
+    // 创建开始/停止按钮
+    lv_obj_t *start_stop_btn = lv_btn_create(current_screen_);
+    lv_obj_set_size(start_stop_btn, btn_width, btn_height);
+    lv_obj_align(start_stop_btn, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_t *start_stop_label = lv_label_create(start_stop_btn);
+    lv_label_set_text(start_stop_label, "Start Recording");
+    lv_obj_center(start_stop_label);
+    lv_obj_add_event_cb(start_stop_btn, microphoneStartStopCallback, LV_EVENT_CLICKED, this);
+
+    // 创建返回按钮
+    lv_obj_t *back_btn = lv_btn_create(current_screen_);
+    lv_obj_set_size(back_btn, btn_width, btn_height);
+    lv_obj_align(back_btn, LV_ALIGN_BOTTOM_RIGHT, -margin, -margin);
+    lv_obj_t *back_label = lv_label_create(back_btn);
+    lv_label_set_text(back_label, LV_SYMBOL_LEFT" Back");
+    lv_obj_center(back_label);
+    lv_obj_add_event_cb(back_btn, backToMainUICallback, LV_EVENT_CLICKED, this);
+}
+
+// 添加Microphone按钮事件回调函数
+void UIManager::microphoneUIEventCallback(lv_event_t *e) {
+    UIManager* ui_manager = static_cast<UIManager*>(lv_event_get_user_data(e));
+    if (ui_manager) {
+        ui_manager->switchToMicrophoneUI();
+    }
+}
+
+// 添加麦克风开始/停止按钮事件回调函数
+void UIManager::microphoneStartStopCallback(lv_event_t *e) {
+    UIManager* ui_manager = static_cast<UIManager*>(lv_event_get_user_data(e));
+    if (ui_manager) {
+        MicrophoneService& microphone_service = MicrophoneService::getInstance();
+        lv_obj_t* button = static_cast<lv_obj_t*>(lv_event_get_target(e));
+        lv_obj_t* label = lv_obj_get_child(button, 0);
+        
+        if (!microphone_service.isRecording()) {
+            // 开始录音
+            microphone_service.startRecording();
+            lv_label_set_text(label, "Stop Recording");
+            if (ui_manager->microphone_status_label_) {
+                lv_label_set_text(ui_manager->microphone_status_label_, "Recording Active - Speak now");
+            }
+            ESP_LOGI("UIManager", "Microphone recording started");
+        } else {
+            // 停止录音
+            microphone_service.stopRecording();
+            lv_label_set_text(label, "Start Recording");
+            if (ui_manager->microphone_status_label_) {
+                lv_label_set_text(ui_manager->microphone_status_label_, "Recording Stopped");
+            }
+            ESP_LOGI("UIManager", "Microphone recording stopped");
+        }
+    }
+}
+
+
 // 事件回调函数实现
 void UIManager::wifiUIEventCallback(lv_event_t *e) {
     UIManager* ui_manager = static_cast<UIManager*>(lv_event_get_user_data(e));
@@ -654,6 +773,16 @@ void UIManager::backToMainUICallback(lv_event_t *e) {
     }
 }
 
+void UIManager::backToWiFiConfigUICallback(lv_event_t *e){
+    UIManager* ui_manager = static_cast<UIManager*>(lv_event_get_user_data(e));
+    if (ui_manager) {
+        WiFiManager& wifi_manager = WiFiManager::getInstance();
+        wifi_manager.stopQRConfig();
+
+        ui_manager->switchToWiFiConfigUI();
+    }
+}
+
 void UIManager::wifiConnectBtnCallback(lv_event_t *e) {
     UIManager* ui_manager = static_cast<UIManager*>(lv_event_get_user_data(e));
     if (ui_manager) {
@@ -667,16 +796,13 @@ void UIManager::wifiConnectBtnCallback(lv_event_t *e) {
     }
 }
 
-void UIManager::wifiConfigBtnCallback(lv_event_t *e) {
+void UIManager::wifiQRConfigBtnCallback(lv_event_t *e) {
     UIManager* ui_manager = static_cast<UIManager*>(lv_event_get_user_data(e));
     if (ui_manager) {
         WiFiManager& wifi_manager = WiFiManager::getInstance();
         wifi_manager.startQRConfig();
         
-        // 更新UI状态
-        if (ui_manager->wifi_status_label_) {
-            lv_label_set_text(ui_manager->wifi_status_label_, "status: QR config started");
-        }
+        ui_manager->switchToWiFiQRUI();
     }
 }
 
@@ -769,52 +895,7 @@ void UIManager::getJokeBtnCallback(lv_event_t *e) {
 }
 
 
-// 添加Setting界面创建函数
-void UIManager::createSettingUI() {
-    if (current_screen_) {
-        lv_obj_del(current_screen_);
-    }
-    
-    current_screen_ = lv_obj_create(NULL);
-    lv_screen_load(current_screen_);
-    
-    // 计算自适应尺寸
-    int btn_width = calcBtnWidth();
-    int btn_height = calcBtnHeight();
-    int btn_spacing = calcBtnSpacing();
-    int margin = btn_spacing / 2;
-    
-    ESP_LOGI("UIManager", "创建设置界面 - 屏幕分辨率: %dx%d", EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES);
 
-    // 创建设置标题
-    setting_label_ = lv_label_create(current_screen_);
-    lv_label_set_text(setting_label_, "Settings");
-    lv_obj_align(setting_label_, LV_ALIGN_TOP_MID, 0, margin);
-    
-    // 创建旋转按钮
-    lv_obj_t *rotate_btn = lv_btn_create(current_screen_);
-    lv_obj_set_size(rotate_btn, btn_width+btn_spacing, btn_height);
-    lv_obj_align(rotate_btn, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_t *rotate_label = lv_label_create(rotate_btn);
-    lv_label_set_text(rotate_label, LV_SYMBOL_REFRESH" Rotate");
-    lv_obj_center(rotate_label);
-    lv_obj_add_event_cb(rotate_btn, rotateBtnCallback, LV_EVENT_CLICKED, this);
-
-    // 创建返回按钮
-    lv_obj_t *back_btn = lv_btn_create(current_screen_);
-    lv_obj_set_size(back_btn, btn_width, btn_height);
-    lv_obj_align(back_btn, LV_ALIGN_BOTTOM_RIGHT, -margin, -margin);
-    lv_obj_t *back_label = lv_label_create(back_btn);
-    lv_label_set_text(back_label, LV_SYMBOL_LEFT" Back");
-    lv_obj_center(back_label);
-    lv_obj_add_event_cb(back_btn, backToMainUICallback, LV_EVENT_CLICKED, this);
-}
-
-// 添加Setting界面切换函数
-void UIManager::switchToSettingUI() {
-    ESP_LOGI("UIManager", "切换到设置界面");
-    createSettingUI();
-}
 
 // 添加Setting按钮事件回调函数
 void UIManager::settingUIEventCallback(lv_event_t *e) {

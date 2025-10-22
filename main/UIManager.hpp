@@ -12,6 +12,7 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_mac.h"
 
 #include "QRConfigManager.hpp"
 #include "WiFiManager.hpp"
@@ -46,6 +47,7 @@ public:
     void switchToJokeUI();
     void switchToSettingUI();
     void switchToMicrophoneUI();
+    void switchToWiFiQRUI();
     
     lv_display_t* getDisplay() { return display_; }
     lv_indev_t* getTouchInput() { return touch_indev_; }
@@ -142,6 +144,7 @@ private:
     // 界面创建函数
     void createMainUI();
     void createWiFiConfigUI();
+    void createWiFiQRUI();
     void createJokeUI();
     void createSettingUI();
     void createMicrophoneUI();
@@ -163,10 +166,11 @@ private:
     static void jokeUIEventCallback(lv_event_t *e);
     static void settingUIEventCallback(lv_event_t *e);
     static void backToMainUICallback(lv_event_t *e);
+    static void backToWiFiConfigUICallback(lv_event_t *e);
     static void microphoneUIEventCallback(lv_event_t *e);
     
     static void wifiConnectBtnCallback(lv_event_t *e);
-    static void wifiConfigBtnCallback(lv_event_t *e);
+    static void wifiQRConfigBtnCallback(lv_event_t *e);
     static void getJokeBtnCallback(lv_event_t *e);
     static void rotateBtnCallback(lv_event_t *e);
     static void microphoneStartStopCallback(lv_event_t *e);

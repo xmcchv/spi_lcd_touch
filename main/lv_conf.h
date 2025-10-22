@@ -10,8 +10,8 @@
 #define LV_COLOR_DEPTH 16
 
 /* 字体配置 */
-#define LV_FONT_MONTSERRAT_14 0
-#define LV_FONT_MONTSERRAT_16 0
+#define LV_FONT_MONTSERRAT_14 1
+#define LV_FONT_MONTSERRAT_16 1
 #define LV_FONT_MONTSERRAT_18 0
 #define LV_FONT_MONTSERRAT_20 0
 #define LV_FONT_MONTSERRAT_22 0
@@ -41,7 +41,7 @@
 #define LV_USE_UTF8 1
 
 /* 内存配置 */
-#define LV_MEM_SIZE (32U * 1024U)
+#define LV_MEM_SIZE (64U * 1024U)
 
 /* 其他配置 */
 #define LV_USE_LOG 1
