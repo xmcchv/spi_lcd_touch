@@ -4,21 +4,13 @@
  * SPDX-License-Identifier: CC0-1.0
  */
 
-#include <stdio.h>
-#include <unistd.h>
-#include <sys/lock.h>
-#include <sys/param.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_timer.h"
-#include "esp_lcd_panel_io.h"
-#include "esp_lcd_panel_vendor.h"
-#include "esp_lcd_panel_ops.h"
-#include "driver/gpio.h"
-#include "driver/spi_master.h"
-#include "esp_err.h"
-#include "esp_log.h"
-#include "lvgl.h"
+#include "spi_lcd_touch_example_main.h"
+#include "lvgl_main_ui.h"
+#include "wifi_ui.h"
+
+#if LV_USE_QRCODE
+#include "libs/qrcode/lv_qrcode.h"
+#endif
 
 #if CONFIG_EXAMPLE_LCD_CONTROLLER_ILI9341
 #include "esp_lcd_ili9341.h"
@@ -79,35 +71,186 @@ static const char *TAG = "example";
 #define EXAMPLE_LVGL_TICK_PERIOD_MS    2
 #define EXAMPLE_LVGL_TASK_MAX_DELAY_MS 500
 #define EXAMPLE_LVGL_TASK_MIN_DELAY_MS 1000 / CONFIG_FREERTOS_HZ
-#define EXAMPLE_LVGL_TASK_STACK_SIZE   (4 * 1024)
+#define EXAMPLE_LVGL_TASK_STACK_SIZE   (16 * 1024)
 #define EXAMPLE_LVGL_TASK_PRIORITY     2
 
 // LVGL library is not thread-safe, this example will call LVGL APIs from different tasks, so use a mutex to protect it
 static _lock_t lvgl_api_lock;
-// 在文件开头添加函数声明
-static void calibration_timer_callback(lv_timer_t *timer);
 
-extern void example_lvgl_demo_ui(lv_disp_t *disp);
+//==========================================================
+// WiFi相关变量定义（在源文件中定义）
+lv_obj_t *wifi_status_label = NULL;
+lv_obj_t *wifi_ssid_label = NULL;
+lv_obj_t *wifi_ip_label = NULL;
+lv_obj_t *wifi_connect_btn = NULL;
+lv_obj_t *wifi_config_btn = NULL;
+lv_timer_t *wifi_status_timer = NULL;
 
-// 触摸校准相关变量定义
-static bool calibration_complete = false;
-static lv_obj_t *calibration_label = NULL;
-static lv_obj_t *calibration_point = NULL;
-static int calibration_step = 0;
-static lv_point_t calibration_points[4];  // 四个校准点
-static lv_point_t calibration_touch_points[4];  // 四个触摸点
+// WiFi配置界面变量定义
+lv_obj_t *wifi_config_scr = NULL;
+lv_obj_t *wifi_qrcode_obj = NULL;
+lv_obj_t *wifi_instruction_label = NULL;
+lv_obj_t *wifi_back_btn = NULL;
+lv_obj_t *wifi_ssid_textarea = NULL;
+lv_obj_t *wifi_password_textarea = NULL;
+lv_obj_t *wifi_save_btn = NULL;
 
-// 触摸校准矩阵定义
-typedef struct {
-    int32_t angle;
-    int32_t scale_x;
-    int32_t scale_y;
-    lv_point_t pivot;
-} lv_point_transform_t;
+void delete_wifi_status_timer(void) {
+    if (wifi_status_timer) {
+        lv_timer_delete(wifi_status_timer);
+        wifi_status_timer = NULL;
+        ESP_LOGI("UI_MAIN", "WiFi状态定时器已删除");
+    }
+}
 
-static lv_point_transform_t touch_calibration_matrix = {0};
+// WiFi状态更新定时器回调
+void wifi_status_timer_cb(lv_timer_t *timer) {
+    lv_display_t *display = (lv_display_t *)lv_timer_get_user_data(timer);
+    if (!display) return;
+    if (!wifi_status_label) {
+        ESP_LOGI(TAG, "WiFi status label not created");
+        return;
+    }
+    // 更新WiFi状态显示
+    wifi_status_t status = wifi_get_status();
+    char status_text[32];
+    char ip_text[32];
+    
+    switch (status) {
+        case WIFI_DISCONNECTED:
+            strcpy(status_text, "WiFi: disconnected");
+            break;
+        case WIFI_CONNECTING:
+            strcpy(status_text, "WiFi: connecting...");
+            break;
+        case WIFI_CONNECTED:
+            strcpy(status_text, "WiFi: connected");
+            break;
+        case WIFI_FAILED:
+            strcpy(status_text, "WiFi: connection failed");
+            break;
+    }
+    
+    char* ip_addr = wifi_get_ip();
+    if (strcmp(ip_addr, "0.0.0.0") != 0) {
+        snprintf(ip_text, sizeof(ip_text), "IP: %s", ip_addr);
+    } else {
+        strcpy(ip_text, "IP: not acquired");
+    }
+    
+    if (wifi_status_label && lv_obj_is_valid(wifi_status_label)) {
+        lv_label_set_text(wifi_status_label, status_text);  
+    }
+    if (wifi_ip_label) {
+        lv_label_set_text(wifi_ip_label, ip_text);
+    }
+}
 
-extern void example_lvgl_demo_ui(lv_disp_t *disp);
+// WiFi连接按钮回调（修改为在未配置时显示二维码）
+void wifi_connect_btn_cb(lv_event_t *e) {
+    lv_obj_t *obj = lv_event_get_target(e);
+    (void)obj;
+    
+    app_wifi_config_t config;
+    wifi_get_config(&config);
+    
+    if (config.is_configured) {
+        wifi_connect(config.ssid, config.password);
+    } else {
+        lv_display_t *disp = lv_event_get_user_data(e);
+        
+        // 启动WiFi配置服务器
+        wifi_qr_config_start();
+        
+        // 显示二维码配置界面
+        create_wifi_config_ui(disp);
+    }
+}
+// WiFi配置按钮回调（修改为启动二维码配置）
+void wifi_config_btn_cb(lv_event_t *e) {
+    lv_obj_t *obj = lv_event_get_target(e);
+    (void)obj;
+    
+    lv_display_t *disp = lv_event_get_user_data(e);
+    
+    // 启动WiFi配置服务器
+    wifi_qr_config_start();
+    
+    // 显示二维码配置界面
+    create_wifi_config_ui(disp);
+}
+
+// 创建WiFi配置界面（修改为二维码方式）
+void create_wifi_config_ui(lv_display_t *disp) {
+    // 创建配置界面屏幕
+    wifi_config_scr = lv_obj_create(NULL);
+    lv_screen_load(wifi_config_scr);
+    
+    // 创建标题
+    lv_obj_t *title_label = lv_label_create(wifi_config_scr);
+    lv_label_set_text(title_label, "WiFi QR Code Configuration");
+    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(title_label, LV_ALIGN_TOP_MID, 0, 20);
+    
+    // 创建说明文字
+    wifi_instruction_label = lv_label_create(wifi_config_scr);
+    lv_label_set_text(wifi_instruction_label, "Scan QR code with your phone\nto configure WiFi settings");
+    lv_obj_set_style_text_align(wifi_instruction_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(wifi_instruction_label, LV_ALIGN_TOP_MID, 0, 50);
+    
+    // 创建二维码
+#if LV_USE_QRCODE
+    wifi_qrcode_obj = lv_qrcode_create(wifi_config_scr);
+    lv_qrcode_set_size(wifi_qrcode_obj, 150);
+    lv_qrcode_set_dark_color(wifi_qrcode_obj, lv_color_black());
+    lv_qrcode_set_light_color(wifi_qrcode_obj, lv_color_white());
+    
+    // 生成二维码数据 - 包含设备信息和配置URL
+    char qr_data[256];
+    // 获取设备MAC地址作为唯一标识
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    snprintf(qr_data, sizeof(qr_data), 
+             "http://192.168.4.1/configure?device=%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    
+    lv_qrcode_update(wifi_qrcode_obj, qr_data, strlen(qr_data));
+    lv_obj_align(wifi_qrcode_obj, LV_ALIGN_CENTER, 0, 0);
+#else
+    // 如果不支持二维码，显示错误信息
+    lv_obj_t *error_label = lv_label_create(wifi_config_scr);
+    lv_label_set_text(error_label, "QR Code feature not available");
+    lv_obj_align(error_label, LV_ALIGN_CENTER, 0, 0);
+#endif
+    
+    // 返回按钮
+    wifi_back_btn = lv_btn_create(wifi_config_scr);
+    lv_obj_set_size(wifi_back_btn, 100, 40);
+    lv_obj_align(wifi_back_btn, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_t *back_label = lv_label_create(wifi_back_btn);
+    lv_label_set_text(back_label, "Back");
+    lv_obj_center(back_label);
+    lv_obj_add_event_cb(wifi_back_btn, wifi_config_back_btn_cb, LV_EVENT_CLICKED, disp);
+    
+}
+
+// WiFi保存按钮回调（不再需要，因为通过二维码配置）
+void wifi_save_btn_cb(lv_event_t *e) {
+    lv_display_t *disp = (lv_display_t *)lv_event_get_user_data(e);
+    example_lvgl_demo_ui(disp);
+}
+
+// WiFi返回按钮回调（修改为停止配置服务器）
+void wifi_config_back_btn_cb(lv_event_t *e) {
+    lv_display_t *disp = (lv_display_t *)lv_event_get_user_data(e);
+    
+    // 停止WiFi配置服务器
+    wifi_qr_config_stop();
+    
+    wifi_ui(disp);
+    // example_lvgl_demo_ui(disp);
+}
+
 
 static bool example_notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
 {
@@ -173,159 +316,13 @@ static void example_lvgl_touch_cb(lv_indev_t *indev, lv_indev_data_t *data)
     bool touchpad_pressed = esp_lcd_touch_get_coordinates(touch_pad, touchpad_x, touchpad_y, NULL, &touchpad_cnt, 1);
 
     if (touchpad_pressed && touchpad_cnt > 0) {
-        // 原始触摸坐标
-        uint16_t raw_x = touchpad_x[0];
-        uint16_t raw_y = touchpad_y[0];
-        
-        // 应用触摸校准矩阵（如果已校准）
-        if (touch_calibration_matrix.angle != 0) {
-            // 简单的线性校准：使用偏移和缩放
-            int32_t calibrated_x = raw_x;
-            int32_t calibrated_y = raw_y;
-            
-            // 如果有校准数据，应用简单的线性变换
-            if (touch_calibration_matrix.scale_x != 0 && touch_calibration_matrix.scale_y != 0) {
-                calibrated_x = (raw_x - touch_calibration_matrix.pivot.x) * touch_calibration_matrix.scale_x / 1000 + touch_calibration_matrix.pivot.x;
-                calibrated_y = (raw_y - touch_calibration_matrix.pivot.y) * touch_calibration_matrix.scale_y / 1000 + touch_calibration_matrix.pivot.y;
-            }
-            
-            data->point.x = calibrated_x;
-            data->point.y = calibrated_y;
-        } else {
-            // 未校准时使用基本校准
-            data->point.x = raw_x;
-            data->point.y = raw_y;
-        }
-        
+        data->point.x = touchpad_x[0];
+        data->point.y = touchpad_y[0];
         data->state = LV_INDEV_STATE_PRESSED;
-        
-        // 打印原始和校准后的位置
-        ESP_LOGI(TAG, "Raw: X=%d, Y=%d | Calibrated: X=%d, Y=%d", 
-                 raw_x, raw_y, data->point.x, data->point.y);
+        ESP_LOGI(TAG, "Touchpad pressed at: x=%d, y=%d", touchpad_x[0], touchpad_y[0]);
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }
-}
-
-// 触摸校准界面实现
-static void create_touch_calibration_ui(lv_display_t *disp)
-{
-    lv_obj_t *scr = lv_display_get_screen_active(disp);
-    lv_obj_clean(scr);
-    
-    // 创建校准说明标签
-    calibration_label = lv_label_create(scr);
-    lv_label_set_text(calibration_label, "touch calibration\nclick on the red dot");
-    lv_obj_align(calibration_label, LV_ALIGN_CENTER, 0, -50);
-    lv_obj_set_style_text_align(calibration_label, LV_TEXT_ALIGN_CENTER, 0);
-    
-    // 创建校准点
-    calibration_point = lv_obj_create(scr);
-    lv_obj_set_size(calibration_point, 20, 20);
-    lv_obj_set_style_bg_color(calibration_point, lv_color_hex(0xFF0000), 0);
-    lv_obj_set_style_radius(calibration_point, LV_RADIUS_CIRCLE, 0);
-    
-    // 设置四个校准点位置（屏幕四个角）
-    calibration_points[0] = (lv_point_t){30, 30};           // 左上角
-    calibration_points[1] = (lv_point_t){EXAMPLE_LCD_H_RES - 30, 30};  // 右上角
-    calibration_points[2] = (lv_point_t){EXAMPLE_LCD_H_RES - 30, EXAMPLE_LCD_V_RES - 30};  // 右下角
-    calibration_points[3] = (lv_point_t){30, EXAMPLE_LCD_V_RES - 30};    // 左下角
-    
-    // 移动到第一个校准点
-    lv_obj_set_pos(calibration_point, calibration_points[0].x - 10, calibration_points[0].y - 10);
-    
-    calibration_step = 0;
-    calibration_complete = false;
-}
-
-// 触摸校准回调函数
-static void calibration_touch_cb(lv_event_t *e)
-{
-    lv_display_t *disp = lv_event_get_user_data(e);
-    lv_indev_t *indev = lv_indev_get_act();
-    lv_point_t point;
-    
-    if (indev) {
-        lv_indev_get_point(indev, &point);
-        
-        // 记录触摸点
-        calibration_touch_points[calibration_step] = point;
-        ESP_LOGI(TAG, "校准点 %d: 屏幕(%d,%d) -> 触摸(%d,%d)", 
-                 calibration_step + 1, 
-                 calibration_points[calibration_step].x, calibration_points[calibration_step].y,
-                 point.x, point.y);
-        
-        calibration_step++;
-        
-        if (calibration_step < 4) {
-            // 移动到下一个校准点
-            lv_obj_set_pos(calibration_point, 
-                          calibration_points[calibration_step].x - 10, 
-                          calibration_points[calibration_step].y - 10);
-            lv_label_set_text_fmt(calibration_label, "calibration point %d/4\nclick on the red dot", calibration_step + 1);
-        } else {
-            // 完成校准，计算简单的线性变换
-            // 计算X轴和Y轴的缩放比例
-            int32_t screen_width = EXAMPLE_LCD_H_RES;
-            int32_t screen_height = EXAMPLE_LCD_V_RES;
-            
-            // 计算触摸坐标的范围
-            int32_t touch_min_x = calibration_touch_points[0].x;
-            int32_t touch_max_x = calibration_touch_points[0].x;
-            int32_t touch_min_y = calibration_touch_points[0].y;
-            int32_t touch_max_y = calibration_touch_points[0].y;
-            
-            for (int i = 1; i < 4; i++) {
-                if (calibration_touch_points[i].x < touch_min_x) touch_min_x = calibration_touch_points[i].x;
-                if (calibration_touch_points[i].x > touch_max_x) touch_max_x = calibration_touch_points[i].x;
-                if (calibration_touch_points[i].y < touch_min_y) touch_min_y = calibration_touch_points[i].y;
-                if (calibration_touch_points[i].y > touch_max_y) touch_max_y = calibration_touch_points[i].y;
-            }
-            
-            // 计算缩放比例（乘以1000避免浮点数）
-            touch_calibration_matrix.scale_x = (screen_width * 1000) / (touch_max_x - touch_min_x);
-            touch_calibration_matrix.scale_y = (screen_height * 1000) / (touch_max_y - touch_min_y);
-            touch_calibration_matrix.pivot.x = touch_min_x;
-            touch_calibration_matrix.pivot.y = touch_min_y;
-            touch_calibration_matrix.angle = 1; // 标记为已校准
-            
-            lv_label_set_text(calibration_label, "calibration finished!");
-            calibration_complete = true;
-            
-            // 2秒后显示主界面
-            lv_timer_t *timer = lv_timer_create(calibration_timer_callback, 2000, disp);
-            (void)timer; // 避免未使用变量警告
-        }
-    }
-}
-
-// 定时器回调函数实现
-// 在文件开头添加变量控制校准开启
-static bool enable_calibration = true;  // 控制是否启用校准
-
-static void calibration_timer_callback(lv_timer_t *timer)
-{
-    ESP_LOGI(TAG, "calibration timer callback");
-    
-    // 打印校准矩阵信息
-    ESP_LOGI(TAG, "Calibration Matrix: scale_x=%d, scale_y=%d, pivot=(%d,%d), angle=%d",
-             touch_calibration_matrix.scale_x, touch_calibration_matrix.scale_y,
-             touch_calibration_matrix.pivot.x, touch_calibration_matrix.pivot.y,
-             touch_calibration_matrix.angle);
-    
-    // 获取正确的显示设备（从定时器用户数据中获取）
-    lv_display_t *display = (lv_display_t *)lv_timer_get_user_data(timer);
-    
-    // 清除校准界面
-    lv_obj_t *scr = lv_display_get_screen_active(display);
-    lv_obj_clean(scr);
-    
-    // 显示主界面
-    example_lvgl_demo_ui(display);
-    
-    lv_timer_del(timer);
-    
-    ESP_LOGI(TAG, "calibration complete");
 }
 
 static void example_increase_lvgl_tick(void *arg)
@@ -352,6 +349,9 @@ static void example_lvgl_port_task(void *arg)
 
 void app_main(void)
 {
+    ESP_LOGI(TAG, "初始化WiFi");
+    wifi_init();
+
     ESP_LOGI(TAG, "Turn off LCD backlight");
     gpio_config_t bk_gpio_config = {
         .mode = GPIO_MODE_OUTPUT,
@@ -474,14 +474,14 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)TOUCH_HOST, &tp_io_config, &tp_io_handle));
 
     esp_lcd_touch_config_t tp_cfg = {
-        .x_max = EXAMPLE_LCD_H_RES,
-        .y_max = EXAMPLE_LCD_V_RES,
+        .x_max = EXAMPLE_LCD_V_RES,
+        .y_max = EXAMPLE_LCD_H_RES,
         .rst_gpio_num = -1,
         .int_gpio_num = EXAMPLE_PIN_NUM_TOUCH_IRQ,  // 启用中断功能
         .flags = {
-            .swap_xy = 0,
+            .swap_xy = 1,
             .mirror_x = 0,
-            .mirror_y = CONFIG_EXAMPLE_LCD_MIRROR_Y,
+            .mirror_y = 0,
         },
     };
     esp_lcd_touch_handle_t tp = NULL;
@@ -501,24 +501,12 @@ void app_main(void)
     lv_indev_set_user_data(indev, tp);
     lv_indev_set_read_cb(indev, example_lvgl_touch_cb);
 
-    // 创建触摸校准界面或直接显示主界面
+    // 显示主界面
     _lock_acquire(&lvgl_api_lock);
-    
-    if (enable_calibration) {
-        // 启用校准：创建触摸校准界面
-        create_touch_calibration_ui(display);
-        
-        // 为整个屏幕添加触摸事件，用于校准
-        lv_obj_t *scr = lv_display_get_screen_active(display);
-        lv_obj_add_event_cb(scr, calibration_touch_cb, LV_EVENT_CLICKED, display);
-    } else {
-        // 禁用校准：直接显示主界面
-        example_lvgl_demo_ui(display);
-    }
-    
+    example_lvgl_demo_ui(display);
     _lock_release(&lvgl_api_lock);
     
-    ESP_LOGI(TAG, "触摸校准界面已启动，请按照屏幕提示进行校准");
+    ESP_LOGI(TAG, "主界面已启动");
 #else
     // 如果没有触摸功能，直接显示主界面
     _lock_acquire(&lvgl_api_lock);
@@ -528,4 +516,64 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Start LVGL task");
     xTaskCreate(example_lvgl_port_task, "LVGL", EXAMPLE_LVGL_TASK_STACK_SIZE, NULL, EXAMPLE_LVGL_TASK_PRIORITY, NULL);
+}
+
+
+
+/**
+ * 创建转圈加载动画
+ * @param parent 父对象（通常是屏幕）
+ * @param ref_obj 参考对象（用于对齐，如joke_label）
+ * @param size 动画尺寸（宽高相同）
+ * @param y_offset 与参考对象的垂直间距
+ * @return 创建的动画对象指针（失败返回NULL）
+ */
+lv_obj_t* create_loading_arc(lv_obj_t* parent, lv_obj_t* ref_obj, uint16_t size, int32_t y_offset) {
+    if (!parent || !ref_obj) {
+        ESP_LOGE("LOADING", "无效的父对象或参考对象");
+        return NULL;
+    }
+
+    // 创建圆弧对象
+    lv_obj_t* arc = lv_arc_create(parent);
+    if (!arc) {
+        ESP_LOGE("LOADING", "创建圆弧对象失败");
+        return NULL;
+    }
+
+    // 配置圆弧样式和属性
+    lv_arc_set_rotation(arc, 0);                  // 设置旋转角度
+    lv_arc_set_bg_angles(arc, 0, 360);            // 设置背景圆弧角度（完整圆形）
+    lv_obj_remove_style(arc, NULL, LV_PART_KNOB); // 移除旋钮样式
+    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE); // 禁止点击交互
+    lv_obj_set_size(arc, size, size);             // 设置尺寸
+
+    // 对齐到参考对象下方中间位置
+    lv_obj_align_to(arc, ref_obj, LV_ALIGN_OUT_BOTTOM_MID, 0, y_offset);
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, arc);
+    lv_anim_set_exec_cb(&a, set_angle);
+    lv_anim_set_duration(&a, 1000);
+    lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);    /*Just for the demo*/
+    lv_anim_set_repeat_delay(&a, 500);
+    lv_anim_set_values(&a, 0, 100);
+    lv_anim_start(&a);
+    return arc;
+}
+
+
+/**
+ * 停止并删除转圈加载动画
+ * @param arc 动画对象指针的指针（用于置空避免悬空指针）
+ */
+void delete_loading_arc(lv_obj_t** arc) {
+    if (arc && *arc) {
+        // 检查对象是否有效
+        if (lv_obj_is_valid(*arc)) {
+            lv_obj_del(*arc); // 删除动画对象
+        }
+        *arc = NULL; // 置空指针，避免悬空引用
+        ESP_LOGI("LOADING", "转圈动画已删除");
+    }
 }

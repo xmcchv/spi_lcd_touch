@@ -192,4 +192,6 @@ void example_lvgl_demo_ui(lv_display_t *disp) {
     lv_label_set_text(microphone_label, "Microphone");
     lv_obj_center(microphone_label);
     lv_obj_add_event_cb(microphone_btn, microphone_ui_event_cb, LV_EVENT_CLICKED, disp);
+
+    
 }
