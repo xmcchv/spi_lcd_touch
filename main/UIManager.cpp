@@ -76,7 +76,7 @@ bool UIManager::initializeDisplay() {
     panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
     panel_config.bits_per_pixel = 16;
 
-    // 安装面板驱动
+// 安装面板驱动
 #if CONFIG_EXAMPLE_LCD_CONTROLLER_ILI9341
     ESP_LOGI("UIManager", "安装ILI9341面板驱动");
     ESP_ERROR_CHECK(esp_lcd_new_panel_ili9341(io_handle_, &panel_config, &panel_handle_));
@@ -114,7 +114,7 @@ bool UIManager::initializeTouch() {
     touch_buscfg.miso_io_num = PIN_NUM_TOUCH_MISO;
     touch_buscfg.quadwp_io_num = -1;
     touch_buscfg.quadhd_io_num = -1;
-    touch_buscfg.max_transfer_sz = 1024;
+touch_buscfg.max_transfer_sz = 1024;
     ESP_ERROR_CHECK(spi_bus_initialize(static_cast<spi_host_device_t>(TOUCH_HOST), &touch_buscfg, SPI_DMA_DISABLED));
 
     // 配置触摸IO
@@ -155,18 +155,45 @@ bool UIManager::initializeTouch() {
 
 bool UIManager::initializeLVGL() {
     ESP_LOGI("UIManager", "初始化LVGL库");
+    
+    // 先检查LVGL是否已经初始化
+    if (lv_is_initialized()) {
+        ESP_LOGW("UIManager", "LVGL已经初始化，先进行清理");
+        lv_deinit();
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    
     lv_init();
+
+    // 检查内存状态
+    size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+    ESP_LOGI("UIManager", "系统可用内存: %d字节", free_heap);
+    
+    if (free_heap < (100 * 1024)) {
+        ESP_LOGW("UIManager", "系统内存不足，可能影响LVGL性能");
+    }
 
     // 创建LVGL显示
     display_ = lv_display_create(EXAMPLE_LCD_H_RES, EXAMPLE_LCD_V_RES);
+    if (!display_) {
+        ESP_LOGE("UIManager", "无法创建LVGL显示");
+        return false;
+    }
 
+    // 优化绘制缓冲区大小 - 减少缓冲区行数以节省内存
+    const int OPTIMAL_DRAW_BUF_LINES = 10;  // 减少到10行以节省内存
+    size_t draw_buffer_sz = EXAMPLE_LCD_H_RES * OPTIMAL_DRAW_BUF_LINES * sizeof(lv_color16_t);
+    
+    ESP_LOGI("UIManager", "分配LVGL绘制缓冲区: %d字节", draw_buffer_sz);
+    
     // 分配LVGL使用的绘制缓冲区
-    size_t draw_buffer_sz = EXAMPLE_LCD_H_RES * EXAMPLE_LVGL_DRAW_BUF_LINES * sizeof(lv_color16_t);
     void *buf1 = heap_caps_malloc(draw_buffer_sz, MALLOC_CAP_DMA);
     void *buf2 = heap_caps_malloc(draw_buffer_sz, MALLOC_CAP_DMA);
     
     if (!buf1 || !buf2) {
         ESP_LOGE("UIManager", "无法分配LVGL绘制缓冲区");
+        if (buf1) free(buf1);
+        if (buf2) free(buf2);
         return false;
     }
 
@@ -193,38 +220,104 @@ bool UIManager::initializeLVGL() {
 #if CONFIG_EXAMPLE_LCD_TOUCH_ENABLED
     // 创建触摸输入设备
     touch_indev_ = lv_indev_create();
+    if (!touch_indev_) {
+        ESP_LOGE("UIManager", "无法创建触摸输入设备");
+        return false;
+    }
     lv_indev_set_type(touch_indev_, LV_INDEV_TYPE_POINTER);
     lv_indev_set_display(touch_indev_, display_);
     lv_indev_set_user_data(touch_indev_, touch_handle_);
     lv_indev_set_read_cb(touch_indev_, touchCallback);
 #endif
 
+    // 创建LVGL任务（增加堆栈大小）
+    BaseType_t task_ret = xTaskCreate(
+        lvglTask, 
+        "lvgl_task", 
+        EXAMPLE_LVGL_TASK_STACK_SIZE,  // 使用配置的堆栈大小
+        this, 
+        EXAMPLE_LVGL_TASK_PRIORITY,    // 使用配置的优先级
+        &lvgl_task_handle_              // 使用新添加的任务句柄变量
+    );
+    
+    if (task_ret != pdPASS) {
+        ESP_LOGE("UIManager", "无法创建LVGL任务");
+        return false;
+    }
+    
     ESP_LOGI("UIManager", "LVGL初始化完成");
-    
-    // 创建LVGL任务 - 这是屏幕显示的关键！
-    ESP_LOGI("UIManager", "启动LVGL任务");
-    xTaskCreate(lvglTask, "LVGL", EXAMPLE_LVGL_TASK_STACK_SIZE, this, EXAMPLE_LVGL_TASK_PRIORITY, NULL);
-    
     return true;
 }
 
 // 添加LVGL任务函数
+// 在lvglTask函数中增加堆栈大小
 void UIManager::lvglTask(void *arg) {
     UIManager* ui_manager = static_cast<UIManager*>(arg);
+    if (ui_manager == nullptr) {
+        ESP_LOGE("UIManager", "LVGL任务参数无效");
+        vTaskDelete(nullptr);
+        return;
+    }
     ESP_LOGI("UIManager", "LVGL任务启动");
     
+    // 初始堆栈检查
+    uint32_t initial_stack = uxTaskGetStackHighWaterMark(NULL);
+    ESP_LOGI("UIManager", "LVGL任务初始堆栈剩余: %d字节", initial_stack);
+    
+    if (initial_stack < 2048) {
+        ESP_LOGW("UIManager", "LVGL任务堆栈可能不足，建议增加堆栈大小");
+    }
+    
     uint32_t time_till_next_ms = 0;
+    uint32_t error_count = 0;
+    const uint32_t MAX_ERROR_COUNT = 10;
+
     while (1) {
+        // 检查错误计数，防止无限循环
+        if (error_count > MAX_ERROR_COUNT) {
+            ESP_LOGE("UIManager", "LVGL任务错误过多，重启任务");
+            esp_restart();
+        }
+        
         _lock_acquire(&lvgl_api_lock);
+        
+        // 添加LVGL状态检查
+        if (lv_display_get_default() == nullptr) {
+            ESP_LOGE("UIManager", "LVGL显示未初始化");
+            _lock_release(&lvgl_api_lock);
+            error_count++;
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        
+        // 安全执行LVGL定时器处理（移除try-catch，改用返回值检查）
         time_till_next_ms = lv_timer_handler();
+        
+        // 检查LVGL处理结果是否有效
+        if (time_till_next_ms > 1000) {
+            ESP_LOGW("UIManager", "LVGL定时器处理返回异常延迟: %dms", time_till_next_ms);
+            time_till_next_ms = EXAMPLE_LVGL_TASK_MIN_DELAY_MS;
+        }
+        
         _lock_release(&lvgl_api_lock);
+        error_count = 0; // 重置错误计数
         
         // 防止触发任务看门狗超时
         time_till_next_ms = std::max(time_till_next_ms, static_cast<uint32_t>(EXAMPLE_LVGL_TASK_MIN_DELAY_MS));
-        // 防止LVGL显示未准备好
         time_till_next_ms = std::min(time_till_next_ms, static_cast<uint32_t>(EXAMPLE_LVGL_TASK_MAX_DELAY_MS));
         
         vTaskDelay(pdMS_TO_TICKS(time_till_next_ms));
+        
+        // 定期检查堆栈使用情况
+        static uint32_t stack_check_counter = 0;
+        if (++stack_check_counter % 200 == 0) {
+            uint32_t stack_remaining = uxTaskGetStackHighWaterMark(NULL);
+            ESP_LOGI("UIManager", "LVGL任务堆栈剩余: %d字节", stack_remaining);
+            
+            if (stack_remaining < 1024) {
+                ESP_LOGW("UIManager", "LVGL任务堆栈不足，剩余: %d字节", stack_remaining);
+            }
+        }
     }
 }
 
@@ -340,17 +433,26 @@ int UIManager::calcBtnSpacing() const {
 }
 
 // 切换到主界面
+// 在界面切换函数中添加对象安全检查
 void UIManager::switchToMainUI() {
     ESP_LOGI("UIManager", "切换到主界面");
+    
     // 取消正在进行的笑话请求
     JokeService& joke_service = JokeService::getInstance();
     joke_service.cancelCurrentRequest();
-    // 删除加载动画
-    if (joke_loading_arc_) {
-        deleteLoadingArc(&joke_loading_arc_);
-    }
+    
+    // 安全删除加载动画
+    safeDeleteLvglObject(&joke_loading_arc_);
+    
     // 删除WIFI状态定时器
     deleteWifiStatusTimer();
+    
+    // 安全删除当前屏幕
+    // safeDeleteLvglObject(&current_screen_);
+
+    // 给LVGL一些时间处理删除操作
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
     // 创建主界面
     createMainUI();
 }
@@ -704,6 +806,15 @@ void UIManager::createMicrophoneUI() {
     lv_obj_center(start_stop_label);
     lv_obj_add_event_cb(start_stop_btn, microphoneStartStopCallback, LV_EVENT_CLICKED, this);
 
+    // 实时录音转喇叭播放按钮
+    // lv_obj_t *play_btn = lv_btn_create(current_screen_);
+    // lv_obj_set_size(play_btn, btn_width, btn_height);
+    // lv_obj_align(play_btn, LV_ALIGN_CENTER, 0, btn_spacing);
+    // lv_obj_t *play_label = lv_label_create(play_btn);
+    // lv_label_set_text(play_label, "Play Audio");
+    // lv_obj_center(play_label);
+    // lv_obj_add_event_cb(play_btn, playAudioCallback, LV_EVENT_CLICKED, this);
+
     // 创建返回按钮
     lv_obj_t *back_btn = lv_btn_create(current_screen_);
     lv_obj_set_size(back_btn, btn_width, btn_height);
@@ -731,6 +842,14 @@ void UIManager::microphoneStartStopCallback(lv_event_t *e) {
         lv_obj_t* label = lv_obj_get_child(button, 0);
         
         if (!microphone_service.isRecording()) {
+            // 开始录音前先初始化I2S通道
+            if (!microphone_service.initialize()) {
+                ESP_LOGE("UIManager", "Failed to initialize microphone service");
+                if (ui_manager->microphone_status_label_) {
+                    lv_label_set_text(ui_manager->microphone_status_label_, "Initialization Failed");
+                }
+                return;
+            }
             // 开始录音
             microphone_service.startRecording();
             lv_label_set_text(label, "Stop Recording");
@@ -747,6 +866,15 @@ void UIManager::microphoneStartStopCallback(lv_event_t *e) {
             }
             ESP_LOGI("UIManager", "Microphone recording stopped");
         }
+    }
+}
+
+void UIManager::playAudioCallback(lv_event_t *e){
+    UIManager* ui_manager = static_cast<UIManager*>(lv_event_get_user_data(e));
+    if (ui_manager) {
+        MicrophoneService& microphone_service = MicrophoneService::getInstance();
+        // 播放录音
+        // microphone_service.playAudio();
     }
 }
 
@@ -849,10 +977,12 @@ lv_obj_t* UIManager::createLoadingArc(lv_obj_t* parent, lv_obj_t* reference, uin
 }
 
 // 删除加载动画
-void UIManager::deleteLoadingArc(lv_obj_t** loading_arc) {
-    if (loading_arc && *loading_arc) {
-        lv_obj_del(*loading_arc);
-        *loading_arc = nullptr;
+void UIManager::deleteLoadingArc(lv_obj_t** arc_ptr) {
+    if (arc_ptr && *arc_ptr) {
+        if (lv_obj_is_valid(*arc_ptr)) {
+            lv_obj_del(*arc_ptr);
+        }
+        *arc_ptr = nullptr;
     }
 }
 
@@ -1001,4 +1131,25 @@ void UIManager::wifiStatusTimerCallback(lv_timer_t* timer) {
             lv_label_set_text(ui_manager->wifi_ssid_label_, "SSID: unknown");
         }
     }
+}
+
+// 实现内存保护函数
+bool UIManager::isLvglObjectValid(lv_obj_t* obj) {
+    if (obj == nullptr) return false;
+    
+    // 简单的有效性检查
+    // 注意：LVGL没有提供标准的对象有效性检查函数
+    // 这里使用一些启发式方法
+    return (lv_obj_get_parent(obj) != nullptr || lv_obj_get_screen(obj));
+}
+
+void UIManager::safeDeleteLvglObject(lv_obj_t** obj_ptr) {
+    if (obj_ptr == nullptr || *obj_ptr == nullptr) return;
+    
+    _lock_acquire(&lvgl_api_lock);
+    if (isLvglObjectValid(*obj_ptr)) {
+        lv_obj_del(*obj_ptr);
+    }
+    *obj_ptr = nullptr;
+    _lock_release(&lvgl_api_lock);
 }

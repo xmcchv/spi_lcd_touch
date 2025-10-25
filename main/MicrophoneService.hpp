@@ -44,8 +44,12 @@ private:
     // 私有方法
     bool initializeI2SRX();
     bool initializeI2STX();
+    bool reinitializeI2SChannels();  // 添加重新初始化方法
     static void recordingTask(void* parameter);
     void cleanup();
+    
+    // 添加音频处理函数
+    static void applyLowPassFilter(uint8_t* input, uint8_t* output, size_t size);
 };
 
 #endif // MICROPHONE_SERVICE_HPP

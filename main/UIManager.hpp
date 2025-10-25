@@ -4,6 +4,7 @@
 #include "lvgl.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_mac.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_vendor.h"
 #include "esp_lcd_panel_ops.h"
@@ -78,6 +79,9 @@ private:
     esp_timer_handle_t lvgl_tick_timer_ = nullptr;
     lv_timer_t* wifi_status_timer_ = nullptr;  // 添加WiFi状态更新定时器
     
+    // 任务句柄
+    TaskHandle_t lvgl_task_handle_ = nullptr;  // 添加LVGL任务句柄
+    
     // UI组件成员
     lv_obj_t* current_screen_ = nullptr;
     lv_obj_t* wifi_status_label_ = nullptr;
@@ -128,7 +132,7 @@ private:
     static constexpr int EXAMPLE_LVGL_TICK_PERIOD_MS = 2;
     static constexpr int EXAMPLE_LVGL_TASK_MAX_DELAY_MS = 500;
     static constexpr int EXAMPLE_LVGL_TASK_MIN_DELAY_MS = 1000 / CONFIG_FREERTOS_HZ;
-    static constexpr int EXAMPLE_LVGL_TASK_STACK_SIZE = (16 * 1024);
+    static constexpr int EXAMPLE_LVGL_TASK_STACK_SIZE = (32 * 1024);
     static constexpr int EXAMPLE_LVGL_TASK_PRIORITY = 2;
 
     // 按钮尺寸计算百分比（基于屏幕分辨率的百分比）
@@ -174,6 +178,7 @@ private:
     static void getJokeBtnCallback(lv_event_t *e);
     static void rotateBtnCallback(lv_event_t *e);
     static void microphoneStartStopCallback(lv_event_t *e);
+    static void playAudioCallback(lv_event_t *e);
 
     // WiFi状态更新定时器相关函数
     void deleteWifiStatusTimer();
@@ -182,6 +187,9 @@ private:
     // 加载动画相关方法
     lv_obj_t* createLoadingArc(lv_obj_t* parent, lv_obj_t* reference, uint16_t size, int32_t x_offset, int32_t y_offset);
     void deleteLoadingArc(lv_obj_t** loading_arc);
+
+    static bool isLvglObjectValid(lv_obj_t* obj);
+    static void safeDeleteLvglObject(lv_obj_t** obj_ptr);
 };
 
     
