@@ -104,22 +104,23 @@ private:
     static constexpr int EXAMPLE_LCD_V_RES = 240;
     #endif
     
+       
     // GPIO引脚定义
     // LCD SPI pins (屏幕SPI引脚)
-    static constexpr int PIN_NUM_SCLK = 18;
-    static constexpr int PIN_NUM_MOSI = 19;
-    static constexpr int PIN_NUM_MISO = 21;
+    static constexpr int PIN_NUM_SCLK = GPIO_NUM_21;
+    static constexpr int PIN_NUM_MOSI = GPIO_NUM_47;
+    static constexpr int PIN_NUM_MISO = GPIO_NUM_46;
     // LCD control pins (屏幕控制引脚)
-    static constexpr int PIN_NUM_LCD_DC = 5;
-    static constexpr int PIN_NUM_LCD_RST = 3;
-    static constexpr int PIN_NUM_LCD_CS = 4;
-    static constexpr int PIN_NUM_BK_LIGHT = 2;
+    static constexpr int PIN_NUM_LCD_DC = GPIO_NUM_40;
+    static constexpr int PIN_NUM_LCD_RST = GPIO_NUM_45;
+    static constexpr int PIN_NUM_LCD_CS = GPIO_NUM_41;
+    static constexpr int PIN_NUM_BK_LIGHT = GPIO_NUM_42;
     // Touch SPI pins (触摸SPI引脚 - 使用独立的SPI总线)
-    static constexpr int PIN_NUM_TOUCH_SCLK = 7; // T_CLK
-    static constexpr int PIN_NUM_TOUCH_MOSI = 6; // T_MOSI
-    static constexpr int PIN_NUM_TOUCH_MISO = 8; // T_MISO
-    static constexpr int PIN_NUM_TOUCH_CS = 15; // T_CS
-    static constexpr int PIN_NUM_TOUCH_IRQ = 16; // T_IRQ
+    static constexpr int PIN_NUM_TOUCH_SCLK = GPIO_NUM_9; // T_CLK
+    static constexpr int PIN_NUM_TOUCH_MOSI = GPIO_NUM_11; // T_MOSI DIN
+    static constexpr int PIN_NUM_TOUCH_MISO = GPIO_NUM_12; // T_MISO DO
+    static constexpr int PIN_NUM_TOUCH_CS = GPIO_NUM_10; // T_CS
+    static constexpr int PIN_NUM_TOUCH_IRQ = GPIO_NUM_13; // T_IRQ
     static constexpr int PIN_NUM_TOUCH_RST = -1; // T_RST
     
     // Bit number used to represent command and parameter

@@ -11,6 +11,20 @@ class MicrophoneService {
 public:
     static MicrophoneService& getInstance();
     
+    // GPIO引脚定义
+    static constexpr gpio_num_t INMP_SD = GPIO_NUM_7;
+    static constexpr gpio_num_t INMP_SCK = GPIO_NUM_38;
+    static constexpr gpio_num_t INMP_WS = GPIO_NUM_4;
+    static constexpr gpio_num_t MAX_DIN = GPIO_NUM_6;
+    static constexpr gpio_num_t MAX_BCLK = GPIO_NUM_15;
+    static constexpr gpio_num_t MAX_LRC = GPIO_NUM_16;
+    
+    // 音频配置
+    static constexpr int AUDIO_INPUT_SAMPLE_RATE  = 16000;
+    static constexpr int AUDIO_OUTPUT_SAMPLE_RATE = 24000;
+
+    static constexpr int BUF_SIZE = (1023 * 1 * 32 / 8); // DMA帧数 * 声道数 * 数据位宽 / 8
+    
     bool initialize();
     void startRecording();
     void stopRecording();
@@ -21,17 +35,6 @@ private:
     MicrophoneService();
     ~MicrophoneService();
     
-    // GPIO引脚定义
-    static constexpr gpio_num_t INMP_SD = GPIO_NUM_37;
-    static constexpr gpio_num_t INMP_SCK = GPIO_NUM_38;
-    static constexpr gpio_num_t INMP_WS = GPIO_NUM_39;
-    static constexpr gpio_num_t MAX_DIN = GPIO_NUM_42;
-    static constexpr gpio_num_t MAX_BCLK = GPIO_NUM_40;
-    static constexpr gpio_num_t MAX_LRC = GPIO_NUM_41;
-    
-    // 音频配置
-    static constexpr int SAMPLE_RATE = 44100;
-    static constexpr int BUF_SIZE = (1023 * 1 * 32 / 8); // DMA帧数 * 声道数 * 数据位宽 / 8
     
     // I2S通道句柄
     i2s_chan_handle_t rx_handle_ = nullptr;

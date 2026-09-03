@@ -41,6 +41,7 @@ bool MicrophoneService::initialize() {
     return true;
 }
 
+// 初始化I2S RX通道 麦克风输入
 bool MicrophoneService::initializeI2SRX() {
     ESP_LOGI(TAG, "Initializing I2S RX...");
     
@@ -59,7 +60,7 @@ bool MicrophoneService::initializeI2SRX() {
     ESP_LOGI(TAG, "RX channel created successfully");
 
     i2s_std_config_t std_cfg = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE),
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO_INPUT_SAMPLE_RATE),
         .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
@@ -95,6 +96,7 @@ bool MicrophoneService::initializeI2SRX() {
     return true;
 }
 
+// 初始化I2S TX通道 扬声器输出
 bool MicrophoneService::initializeI2STX() {
     ESP_LOGI(TAG, "Initializing I2S TX...");
     
@@ -113,7 +115,7 @@ bool MicrophoneService::initializeI2STX() {
     ESP_LOGI(TAG, "TX channel created successfully");
 
     i2s_std_config_t std_cfg = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE),
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO_OUTPUT_SAMPLE_RATE),
         .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
